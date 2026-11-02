@@ -1,0 +1,14 @@
+[project]
+name = "voxclutch-live"
+version = "0.2.0"
+description = "Explainable Twitch chat and local VOD audio moment radar with creator-controlled clip review"
+requires-python = ">=3.10"
+dependencies = ["Flask>=3.0,<4.0", "websocket-client>=1.8,<2.0"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
