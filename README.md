@@ -12,6 +12,14 @@
 
 ---
 
+## 🎬 Motion Graphics Explainer Video
+
+[![VoxClutch Motion Graphics Video](video/out/thumb.png)](video/out/voxclutch-explainer.mp4)
+
+*A full 1080p60 programmatic motion graphics video created with Remotion is included in [`video/out/voxclutch-explainer.mp4`](video/out/voxclutch-explainer.mp4).*
+
+---
+
 ## 🌟 Key Highlights
 
 - 🎯 **No Bot / No OAuth Required**: Connects anonymously to public Twitch IRC over WebSocket (`justinfan`). Read-only, zero account linkage, zero channel moderation risks.
