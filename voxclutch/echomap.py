@@ -6,9 +6,36 @@ import shutil
 import statistics
 import subprocess
 import sys
+from threading import Thread
 from pathlib import Path
 
 SAMPLE_RATE = 8000
+
+def _rms_dbfs_from_pcm(stream) -> list[float]:
+    """Read little-endian mono s16le PCM and return one RMS dBFS value per second."""
+    samples_per_second = SAMPLE_RATE
+    bytes_per_second = samples_per_second * 2
+    levels = []
+    while True:
+        block = bytearray()
+        while len(block) < bytes_per_second:
+            chunk = stream.read(bytes_per_second - len(block))
+            if not chunk:
+                break
+            block.extend(chunk)
+        raw = bytes(block)
+        if not raw:
+            break
+        if len(raw) % 2:
+            raise RuntimeError('FFmpeg returned an incomplete 16-bit PCM sample.')
+        samples = array('h')
+        samples.frombytes(raw)
+        if sys.byteorder != 'little':
+            samples.byteswap()
+        mean_square = sum(sample * sample for sample in samples) / len(samples)
+        rms = math.sqrt(mean_square)
+        levels.append(round(20 * math.log10(max(rms / 32768.0, 1e-6)), 2))
+    return levels
 
 def analyze_audio_levels(video_path: Path, timeout_seconds: int = 300) -> list[float]:
     """Decode mono PCM at 8 kHz and return one RMS dBFS value per second.
@@ -18,27 +45,66 @@ def analyze_audio_levels(video_path: Path, timeout_seconds: int = 300) -> list[f
     """
     if shutil.which('ffmpeg') is None:
         raise RuntimeError('FFmpeg was not found. Install FFmpeg to run EchoMap.')
-    command = ['ffmpeg','-hide_banner','-loglevel','error','-i',str(Path(video_path).resolve()),'-vn','-ac','1','-ar',str(SAMPLE_RATE),'-f','s16le','pipe:1']
+    command = [
+        'ffmpeg', '-hide_banner', '-loglevel', 'error', '-i', str(Path(video_path).resolve()),
+        '-vn', '-ac', '1', '-ar', str(SAMPLE_RATE), '-f', 's16le', 'pipe:1',
+    ]
     try:
-        result = subprocess.run(command,capture_output=True,timeout=timeout_seconds,check=False)
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except OSError as exc:
+        raise RuntimeError('FFmpeg could not be started for local audio analysis.') from exc
+
+    levels: list[float] = []
+    read_errors: list[Exception] = []
+    stderr_tail = bytearray()
+
+    def read_audio() -> None:
+        try:
+            if process.stdout is not None:
+                levels.extend(_rms_dbfs_from_pcm(process.stdout))
+        except Exception as exc:  # surfaced in the calling thread after FFmpeg exits
+            read_errors.append(exc)
+
+    def read_errors_from_ffmpeg() -> None:
+        if process.stderr is None:
+            return
+        for chunk in iter(lambda: process.stderr.read(4096), b''):
+            stderr_tail.extend(chunk)
+            if len(stderr_tail) > 4096:
+                del stderr_tail[:-4096]
+
+    audio_reader = Thread(target=read_audio, daemon=True)
+    error_reader = Thread(target=read_errors_from_ffmpeg, daemon=True)
+    audio_reader.start()
+    error_reader.start()
+    try:
+        return_code = process.wait(timeout=timeout_seconds)
     except subprocess.TimeoutExpired as exc:
+        process.kill()
+        process.wait()
+        audio_reader.join()
+        error_reader.join()
+        if process.stdout is not None:
+            process.stdout.close()
+        if process.stderr is not None:
+            process.stderr.close()
         raise RuntimeError('Local audio analysis timed out. Try a shorter VOD.') from exc
-    if result.returncode:
-        detail=result.stderr.decode('utf-8','replace')[-1000:]
-        if b'does not contain any stream' in result.stderr or b'Output file #0 does not contain any stream' in result.stderr:
+    audio_reader.join()
+    error_reader.join()
+    if process.stdout is not None:
+        process.stdout.close()
+    if process.stderr is not None:
+        process.stderr.close()
+
+    if read_errors:
+        raise RuntimeError(f'Could not read FFmpeg PCM output: {read_errors[0]}') from read_errors[0]
+    if return_code:
+        detail = bytes(stderr_tail).decode('utf-8', 'replace')[-1000:]
+        if 'does not contain any stream' in detail.lower():
             raise ValueError('This VOD has no readable audio track.')
         raise RuntimeError(detail or 'FFmpeg could not read audio from this VOD.')
-    samples=array('h')
-    samples.frombytes(result.stdout)
-    if sys.byteorder!='little': samples.byteswap()
-    if not samples: raise ValueError('No audio samples were found in this VOD.')
-    per_second=SAMPLE_RATE
-    levels=[]
-    for first in range(0,len(samples),per_second):
-        block=samples[first:first+per_second]
-        mean_square=sum(sample*sample for sample in block)/len(block)
-        rms=math.sqrt(mean_square)
-        levels.append(round(20*math.log10(max(rms/32768.0,1e-6)),2))
+    if not levels:
+        raise ValueError('No audio samples were found in this VOD.')
     return levels
 
 def _clamp(value: float, low: float, high: float) -> float:

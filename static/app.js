@@ -31,6 +31,7 @@ function shortClock(seconds) {
 
 function renderMoment(moment) {
   const signals = moment.signals || {};
+  const components = signals.score_components || {};
   const source = escapeHtml(moment.source || 'live');
   const status = moment.status || 'new';
   const score = Math.max(0, Math.min(100, Number(moment.score) || 0));
@@ -49,7 +50,7 @@ function renderMoment(moment) {
     <div class="moment-top"><div><span class="moment-time">${shortClock(moment.start_seconds)} → ${shortClock(moment.end_seconds)}</span><span class="moment-source">${source}${status !== 'new' ? ` · ${escapeHtml(status)}` : ''}</span></div>
       <div class="moment-score"><div class="score-track"><i style="width:${score}%"></i></div>${score.toFixed(0)}<small>CHAT</small></div></div>
     <h3 class="moment-title">${status === 'dismissed' ? 'Dismissed reaction window' : 'Audience reaction spike'}</h3>
-    <div class="signal-chips"><span class="signal-chip"><b>${signals.messages || 0}</b> msgs / ${signals.window_seconds || 15}s</span><span class="signal-chip"><b>${signals.unique_chatters || 0}</b> unique chatters</span><span class="signal-chip"><b>${signals.reaction_messages || 0}</b> reaction messages</span></div>
+    <div class="signal-chips"><span class="signal-chip"><b>${signals.messages || 0}</b> msgs / ${signals.window_seconds || 15}s</span><span class="signal-chip"><b>${signals.unique_chatters || 0}</b> unique chatters</span><span class="signal-chip">velocity <b>${Math.round((Number(components.chat_velocity) || 0) * 100)}%</b></span><span class="signal-chip">entropy <b>${components.unique_chatter_entropy === undefined ? '—' : `${Math.round(Number(components.unique_chatter_entropy) * 100)}%`}</b></span><span class="signal-chip">reaction cues <b>${Math.round((Number(components.reaction_density) || 0) * 100)}%</b></span><span class="signal-chip"><b>${signals.reaction_messages || 0}</b> reaction messages</span></div>
     ${echoMap}
     <div class="moment-bottom"><div class="moment-explain">Why flagged: fast chat + ${signals.unique_chatters || 0} distinct voices${signals.reaction_messages ? ` + ${signals.reaction_messages} reaction cues` : ''}. Chat score is heuristic, not an AI verdict.</div><div class="moment-actions">${actions}${clip}</div></div>
   </article>`;

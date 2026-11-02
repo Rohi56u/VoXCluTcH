@@ -1,9 +1,10 @@
 """Transparent, deterministic chat-reaction scoring for VoxClutch."""
 from __future__ import annotations
 
-from collections import deque
+from collections import Counter, deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import math
 from typing import Deque, Iterable
 
 REACTION_WORDS = {
@@ -49,6 +50,24 @@ class MomentDetector:
         words = {w.strip("!?.,:;()[]{}<>\"'`).").lower() for w in text.split()}
         return bool(words & REACTION_WORDS) or any(len(w) >= 5 and len(set(w.lower())) <= 2 for w in text.split())
 
+    @staticmethod
+    def _chatter_entropy(events: Iterable[ChatSignal]) -> float:
+        """Return author-distribution entropy normalized to [0, 1].
+
+        The maximum for N authored messages is log(N), reached when each
+        message comes from a different chatter. This rewards both breadth and
+        balanced participation while assigning no entropy to one-user spam.
+        """
+        author_counts = Counter(event.user for event in events if event.user)
+        authored_messages = sum(author_counts.values())
+        if authored_messages <= 1:
+            return 0.0
+        entropy = -sum(
+            (count / authored_messages) * math.log(count / authored_messages)
+            for count in author_counts.values()
+        )
+        return min(1.0, entropy / math.log(authored_messages))
+
     def ingest(self, user: str, text: str, at: str | datetime, event_id: str) -> dict | None:
         if event_id in self.seen:
             return None
@@ -66,11 +85,11 @@ class MomentDetector:
         reaction_count = sum(self._reaction(e.text) for e in self.events)
         if count < self.min_messages or unique < self.min_unique_chatters:
             return None
-        # 45% chat velocity, 35% unique participation, 20% recognizable reactions.
+        # 45% chat velocity, 35% normalized chatter entropy, 20% reaction cues.
         velocity = min(1.0, count / 12.0)
-        participation = min(1.0, unique / 8.0)
+        chatter_entropy = self._chatter_entropy(self.events)
         reactions = reaction_count / count if count else 0.0
-        score = round(100 * (0.45 * velocity + 0.35 * participation + 0.20 * reactions), 1)
+        score = round(100 * (0.45 * velocity + 0.35 * chatter_entropy + 0.20 * reactions), 1)
         if score < self.threshold:
             return None
         return {
@@ -82,7 +101,11 @@ class MomentDetector:
                 "unique_chatters": unique,
                 "reaction_messages": reaction_count,
                 "window_seconds": int(self.window.total_seconds()),
-                "score_components": {"chat_velocity": round(velocity, 3), "unique_participation": round(participation, 3), "reaction_density": round(reactions, 3)},
+                "score_components": {
+                    "chat_velocity": round(velocity, 3),
+                    "unique_chatter_entropy": round(chatter_entropy, 3),
+                    "reaction_density": round(reactions, 3),
+                },
             },
         }
 

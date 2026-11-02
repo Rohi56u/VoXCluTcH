@@ -1,13 +1,14 @@
 import io
 import base64
 import os
+import struct
 import tempfile
 import unittest
 from unittest.mock import patch
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from app import create_app
-from voxclutch.echomap import audio_evidence
+from voxclutch.echomap import _rms_dbfs_from_pcm, analyze_audio_levels, audio_evidence
 from voxclutch.scoring import MomentDetector
 from voxclutch.store import MomentStore
 
@@ -24,7 +25,25 @@ class DetectorTests(unittest.TestCase):
         self.assertEqual(result['signals']['messages'], 8)
         self.assertEqual(result['signals']['unique_chatters'], 6)
         self.assertEqual(result['signals']['reaction_messages'], 8)
-        self.assertEqual(set(result['signals']['score_components']), {'chat_velocity','unique_participation','reaction_density'})
+        self.assertEqual(set(result['signals']['score_components']), {'chat_velocity','unique_chatter_entropy','reaction_density'})
+
+    def test_chatter_entropy_rewards_balanced_participation(self):
+        base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+        def final_score(users):
+            detector = MomentDetector()
+            result = None
+            for index, user in enumerate(users):
+                result = detector.ingest(user, 'pog', base + timedelta(seconds=index), f'{user}-{index}')
+            return result
+
+        balanced = final_score(['a'] * 4 + ['b'] * 4 + ['c'] * 4)
+        skewed = final_score(['a'] * 10 + ['b', 'c'])
+        balanced_entropy = balanced['signals']['score_components']['unique_chatter_entropy']
+        skewed_entropy = skewed['signals']['score_components']['unique_chatter_entropy']
+        self.assertAlmostEqual(balanced_entropy, 0.442, places=3)
+        self.assertGreater(balanced_entropy, skewed_entropy)
+        self.assertGreater(balanced['score'], skewed['score'])
 
     def test_duplicate_event_is_ignored(self):
         now = datetime.now(timezone.utc)
@@ -74,6 +93,30 @@ class StoreTests(unittest.TestCase):
             with self.assertRaises(ValueError): store.update_status('missing','posted')
 
 class EchoMapTests(unittest.TestCase):
+    def test_pcm_rms_uses_full_seconds_and_includes_final_partial_second(self):
+        pcm = struct.pack('<8000h', *([16384] * 8000)) + struct.pack('<4000h', *([8192] * 4000))
+        self.assertEqual(_rms_dbfs_from_pcm(io.BytesIO(pcm)), [-6.02, -12.04])
+
+    def test_ffmpeg_decode_requests_mono_8khz_and_streams_pcm(self):
+        class FakeProcess:
+            def __init__(self):
+                self.stdout = io.BytesIO(b'\x00\x40' * 8000)
+                self.stderr = io.BytesIO()
+
+            def wait(self, timeout):
+                return 0
+
+        process = FakeProcess()
+        with patch('voxclutch.echomap.shutil.which', return_value='ffmpeg.exe'), patch(
+            'voxclutch.echomap.subprocess.Popen', return_value=process
+        ) as popen:
+            levels = analyze_audio_levels(Path('sample.mp4'))
+        self.assertEqual(levels, [-6.02])
+        command = popen.call_args.args[0]
+        self.assertEqual(command[command.index('-ac') + 1], '1')
+        self.assertEqual(command[command.index('-ar') + 1], '8000')
+        self.assertEqual(command[-2:], ['s16le', 'pipe:1'])
+
     def test_audio_peak_is_compared_with_nearby_ambient_sound(self):
         levels=[-40.0]*100
         levels[5:15]=[-12.0]*10

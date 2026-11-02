@@ -7,7 +7,7 @@ export const HeuristicEngine: React.FC = () => {
 
   const scoreProgress = interpolate(frame, [30, 90], [0, 84.5], { extrapolateRight: 'clamp' });
   const velocityWidth = interpolate(frame, [15, 60], [0, 92], { extrapolateRight: 'clamp' });
-  const diversityWidth = interpolate(frame, [25, 70], [0, 85], { extrapolateRight: 'clamp' });
+  const entropyWidth = interpolate(frame, [25, 70], [0, 85], { extrapolateRight: 'clamp' });
   const reactionsWidth = interpolate(frame, [35, 80], [0, 75], { extrapolateRight: 'clamp' });
 
   return (
@@ -67,7 +67,7 @@ export const HeuristicEngine: React.FC = () => {
             <div style={{ color: '#64748B', fontSize: '13px', marginBottom: '8px' }}>// DETERMINISTIC COMPOSITE INDEX</div>
             <div>Score = 100 × (</div>
             <div style={{ paddingLeft: '24px', color: '#38BDF8' }}>0.45 × ChatVelocity +</div>
-            <div style={{ paddingLeft: '24px', color: '#A855F7' }}>0.35 × ChatterDiversity +</div>
+            <div style={{ paddingLeft: '24px', color: '#A855F7' }}>0.35 × ChatterEntropy +</div>
             <div style={{ paddingLeft: '24px', color: '#F59E0B' }}>0.20 × ReactionDensity</div>
             <div>)</div>
           </div>
@@ -125,11 +125,11 @@ export const HeuristicEngine: React.FC = () => {
           {/* Meter 2: Diversity */}
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '15px', marginBottom: '8px' }}>
-              <span style={{ color: '#94A3B8' }}>👥 Unique Chatter Ratio (35% weight)</span>
-              <span style={{ color: '#A855F7', fontWeight: 700 }}>7 distinct chatters</span>
+              <span style={{ color: '#94A3B8' }}>👥 Normalized Chatter Entropy (35% weight)</span>
+              <span style={{ color: '#A855F7', fontWeight: 700 }}>0.85 normalized</span>
             </div>
             <div style={{ height: '12px', backgroundColor: '#1E293B', borderRadius: '6px', overflow: 'hidden' }}>
-              <div style={{ height: '100%', width: `${diversityWidth}%`, backgroundColor: '#A855F7', borderRadius: '6px' }} />
+              <div style={{ height: '100%', width: `${entropyWidth}%`, backgroundColor: '#A855F7', borderRadius: '6px' }} />
             </div>
           </div>
 

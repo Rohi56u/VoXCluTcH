@@ -23,7 +23,7 @@
 ## 🌟 Key Highlights
 
 - 🎯 **No Bot / No OAuth Required**: Connects anonymously to public Twitch IRC over WebSocket (`justinfan`). Read-only, zero account linkage, zero channel moderation risks.
-- 📊 **Explainable Reaction Scoring**: Transparent multi-factor heuristic (Chat Velocity 45%, Unique Chatter Ratio 35%, Reaction Cue Density 20%). No black-box AI hallucinations.
+- 📊 **Explainable Reaction Scoring**: Transparent multi-factor heuristic (Chat Velocity 45%, normalized Chatter Entropy 35%, Reaction Cue Density 20%). No black-box AI hallucinations.
 - 🔊 **EchoMap™ Dual-Signal Fusion**: Scans your local VOD audio with FFmpeg (8kHz mono RMS dBFS) to correlate audio volume peaks against nearby baseline noise (`70% Chat + 30% Audio Fit`).
 - 🎬 **Instant Local Clip Rendering**: Synchronous or bounded FFmpeg subprocessing trims high-precision 1080p/60fps clips directly from your local VOD file.
 - 🔒 **Zero Data Leakage**: Chat messages are held in a short rolling in-memory buffer and **never** written to disk. Only aggregate signal statistics and candidate metadata are retained in SQLite.
@@ -33,34 +33,33 @@
 
 ## 🏗️ System Architecture
 
-```text
-  [ Twitch Public Chat ]                     [ Creator VOD File ]
-(Anonymous IRC WebSocket)                      (Local MP4 / MKV)
-           │                                          │
-           ▼                                          ▼
-   TwitchChatListener                           FFmpeg Engine
- (Auto-reconnect & parser)                 (8kHz Mono RMS dBFS Extractor)
-           │                                          │
-           ▼                                          ▼
-   MomentDetector                             EchoMap™ Audio Radar
- (15s Rolling Reaction Gate)               (Peak vs. Ambient Delta dB)
-           │                                          │
-           └─────────────────┬────────────────────────┘
-                             ▼
-                    Dual-Signal Fusion
-             [ 70% Chat + 30% Audio-Fit Rank ]
-                             │
-                             ▼
-                   MomentStore (SQLite)
-             (Aggregate Metrics & Timestamps)
-                             │
-                             ▼
-                  Cyber Studio Dashboard
-             (Review ➔ Keep / Dismiss / Clip)
-                             │
-                             ▼
-                    Local Clip Exporter
-                   (Rendered via FFmpeg)
+```mermaid
+flowchart TD
+    subgraph Ingestion ["1. Signal Ingestion Layer"]
+        A["Twitch Public Chat (IRC WebSocket)"]
+        B["Local Stream VOD (MP4 / MKV / MOV)"]
+    end
+
+    subgraph Processing ["2. Real-Time Heuristic Engine (100% Local)"]
+        direction TB
+        C["TwitchChatListener<br/>Anonymous Read-Only IRC"] --> D["MomentDetector (15s Window)<br/>Velocity (45%) + Entropy (35%) + Cues (20%)"]
+        E["FFmpeg Audio Extractor<br/>8 kHz Mono Signed 16-bit PCM"] --> F["EchoMap Audio Correlator<br/>Window Peak vs 40s Ambient Baseline"]
+        D --> G{"Dual-Signal Fusion Engine"}
+        F --> G
+        G --> H["Ranked Highlight Candidate<br/>70% Chat Dynamics + 30% Audio Fit"]
+    end
+
+    subgraph Storage ["3. Privacy-First Persistence Boundary"]
+        H --> I[("SQLite Database<br/>Timestamps & Heuristics Only<br/>Zero Chat Transcripts Stored")]
+    end
+
+    subgraph Workstation ["4. Creator Review & Clip Production"]
+        I --> J["Cyber Studio Dashboard<br/>127.0.0.1:5050 (Live Triage)"]
+        J --> K["FFmpeg Clip Exporter<br/>1080p60 Trimmed Highlights"]
+    end
+
+    A --> C
+    B --> E
 ```
 
 ---
@@ -68,14 +67,18 @@
 ## 🧮 How It Works
 
 ### 1. Rolling Chat Burst Scoring
-VoxClutch maintains a rolling 15-second FIFO window. When message velocity and unique participant gates are met, it computes:
+VoxClutch maintains a rolling 15-second FIFO window. After the minimum message and unique-chatter gates are met, it computes:
 
-$$\text{Score} = 100 \times \left(0.45 \cdot \min\left(\frac{\text{msgs}}{12}, 1\right) + 0.35 \cdot \min\left(\frac{\text{unique}}{8}, 1\right) + 0.20 \cdot \frac{\text{reactions}}{\text{msgs}}\right)$$
+$$\text{Score} = 100 \times (0.45 \cdot V + 0.35 \cdot E + 0.20 \cdot R)$$
 
-Where reaction cues include curated streamer vernacular (`pog`, `poggers`, `letsgo`, `clutch`, `insane`, `hype`, `kekw`, `lmao`, elongated laughter patterns).
+$$V = \min(\text{messages}/12, 1), \quad E = \frac{-\sum_i p_i \ln(p_i)}{\ln(\text{authored messages})}, \quad R = \text{reaction messages}/\text{messages}$$
+
+Here, $p_i$ is chatter $i$'s share of authored messages; $E$ is 0 when there is at most one authored message. Otherwise it reaches 1 when every authored message comes from a different chatter. It therefore rewards a broad, balanced burst while retaining the fixed 45/35/20 weights.
+
+Reaction cues include curated streamer vernacular (`pog`, `poggers`, `letsgo`, `clutch`, `insane`, `hype`, `kekw`, `lmao`, elongated laughter patterns).
 
 ### 2. EchoMap™ Audio Verification
-When a VOD is uploaded, EchoMap scans the audio energy into per-second RMS decibels (dBFS):
+When a VOD is uploaded, FFmpeg streams mono signed 16-bit PCM at 8 kHz into bounded one-second blocks. EchoMap computes per-second RMS decibels (dBFS):
 - Compares candidate window peak with surrounding 40s ambient noise baseline.
 - Calculates Decibel Delta: $\Delta\text{dB} = \text{Peak}_{\text{window}} - \text{Median}_{\text{ambient}}$
 - Computes Audio Fit: $\text{AudioFit} = \text{clamp}\left(\frac{\Delta\text{dB}}{15} \times 100, 0, 100\right)$
@@ -157,7 +160,7 @@ VoXCluTcH/
 │   └── styles.css             # Cyberpunk dark aesthetic styling
 │
 ├── tests/
-│   └── test_voxclutch.py      # Comprehensive 20-test verification suite
+│   └── test_voxclutch.py      # Comprehensive 23-test verification suite
 │
 └── docs/                      # Technical whitepapers & Devpost drafts
     ├── ARCHITECTURE.md        # Comprehensive pipeline & interface design
@@ -177,7 +180,7 @@ python -m unittest discover -s tests -v
 ```
 
 ```text
-Ran 20 tests in 9.9s
+Ran 23 tests in 9.8s
 OK (All tests passing)
 ```
 
@@ -189,12 +192,6 @@ OK (All tests passing)
 - **No Third-Party AI Data Scrapers**: Video files and chat text never leave your machine.
 - **No Chat Logging**: Raw chat text is processed ephemerally in RAM and purged after 15 seconds.
 - **Host Guard & CSRF Resistance**: Built-in HTTP Host verification and strict origin validation.
-
----
-
-## 🏷️ Tags & Keywords
-
-`#Twitch` `#StreamerTools` `#Gaming` `#Python` `#Flask` `#FFmpeg` `#EchoMap` `#ClipCreator` `#OpenSource` `#TwitchDev` `#DataScience` `#VideoEditing` `#Hackathon` `#IndieDev`
 
 ---
 
