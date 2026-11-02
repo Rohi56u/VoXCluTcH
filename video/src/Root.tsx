@@ -7,7 +7,7 @@ export const RemotionRoot: React.FC = () => {
     <Composition
       id="VoxClutchExplainer"
       component={MainVideo}
-      durationInFrames={1650}
+      durationInFrames={3020}
       fps={30}
       width={1920}
       height={1080}
